@@ -2,6 +2,7 @@
 This file defines layer types that are commonly used for recurrent neural
 networks.
 """
+import numpy as np
 
 
 def rnn_step_forward(x, prev_h, Wx, Wh, b):
@@ -26,8 +27,8 @@ def rnn_step_forward(x, prev_h, Wx, Wh, b):
     # hidden state and any values you need for the backward pass in the next_h   #
     # and cache variables respectively.                                          #
     ##############################################################################
-
-
+    next_h = np.tanh(x.dot(Wx) + prev_h.dot(Wh) + b)
+    cache = (x, prev_h, Wx, Wh, b, next_h)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -54,8 +55,13 @@ def rnn_step_backward(dnext_h, cache):
     # HINT: For the tanh function, you can compute the local derivative in terms #
     # of the output value from tanh.                                             #
     ##############################################################################
-
-
+    x, prev_h, Wx, Wh, b, next_h = cache
+    da = dnext_h * (1 - next_h**2)
+    dx = da.dot(Wx.T)
+    dprev_h = da.dot(Wh.T)
+    dWx = x.T.dot(da)
+    dWh = prev_h.T.dot(da)
+    db = np.sum(da, axis=0)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -84,8 +90,16 @@ def rnn_forward(x, h0, Wx, Wh, b):
     # input data. You should use the rnn_step_forward function that you defined  #
     # above. You can use a for loop to help compute the forward pass.            #
     ##############################################################################
-
-
+    T, N, D = x.shape
+    _, H = h0.shape
+    prev_h = h0
+    cache = []
+    h = []
+    for i in range(T):
+        h_prev, tmp = rnn_step_forward(x[i, :, :], prev_h, Wx, Wh, b)
+        h.append(h_prev)
+        cache.append(tmp)
+    h = h.stack(h)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -111,10 +125,25 @@ def rnn_backward(dh, cache):
     # defined above. You can use a for loop to help compute the backward pass.   #
     ##############################################################################
 
+    T, _, _ = dh.shape
+    dprev_h = dh[-1, :, :]
+    dxt, dht, dWx, dWh, db = rnn_step_backward(dprev_h, cache[-1])
+    dx = []
+    dx.append(dxt)
 
+    for t in range(T - 1):
+        dprev_h = dht + dh[-2 - t, :, :]
+        dxt, dht, dWxt, dWht, dbt = rnn_step_backward(dprev_h, cache[-2 - t])
+        dWx += dWxt
+        dWh += dWht
+        db += dbt
+        dx.append(dxt)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
+    dx = np.stack(dx)
+    dx = dx[::-1, :, :]
+    dh0 = dht
     return dx, dh0, dWx, dWh, db
 
 
@@ -157,8 +186,17 @@ def lstm_step_forward(x, prev_h, prev_c, Wx, Wh, b):
     # for forget gate, input gate, concurrent input, output gate. Wh and b also #
     # follow the same order.                                                    #
     #############################################################################
+    N, D = x.shape
+    _, H = prev_h.shape
+    a = x.dot(Wx) + prev_h.dot(Wh) + b
+    f = sigmoid(a[:, :H])
+    i = sigmoid(a[:, H:2 * H])
+    c = np.tanh(a[:, 2 * H:3 * H])
+    o = sigmoid(a[:, 3 * H:])
 
-
+    next_c = f * prev_c + i * c
+    next_h = o * np.tanh(next_c)
+    cache = (next_c, prev_c, prev_h, x, f, i, c, o, Wx, Wh)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -188,8 +226,19 @@ def lstm_step_backward(dnext_h, dnext_c, cache):
     # HINT: For sigmoid and tanh you can compute local derivatives in terms of  #
     # the output value from the nonlinearity.                                   #
     #############################################################################
-
-
+    next_c, prev_c, prev_h, x, f, i, c, o, Wx, Wh = cache
+    dc_sum = dnext_c + dnext_h * o * (1 - next_c**2)
+    df = dc_sum * prev_c * f * (1 - f)
+    di = dc_sum * c * i * (1 - i)
+    dc = dc_sum * i * (1 - c**2)
+    do = dnext_h * np.tanh(next_c) * o * (1 - o)
+    M = [df, di, dc, do]
+    dWx = x.T.dot(M)
+    dWh = prev_h.T.dot(M)
+    db = np.sum(M, axis=0)
+    dx = M.dot(Wx.T)
+    dprev_h = M.dot(Wh.T)
+    dprev_c = dc_sum * f
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -221,8 +270,17 @@ def lstm_forward(x, h0, Wx, Wh, b):
     # TODO: Implement the forward pass for an LSTM over an entire timeseries.   #
     # You should use the lstm_step_forward function that you just defined.      #
     #############################################################################
-
-
+    T, N, D = x.shape
+    _, H = h0.shape
+    prev_h = h0
+    prev_c = np.zeros(h0.shape)
+    cache = []
+    h = []
+    for i in range(T):
+        h_prev, prev_c, tmp = lstm_step_forward(x[i, :, :], prev_h, prev_c, Wx, Wh, b)
+        h.append(h_prev)
+        cache.append(tmp)
+    h = h.stack(h)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -248,8 +306,24 @@ def lstm_backward(dh, cache):
     # TODO: Implement the backward pass for an LSTM over an entire timeseries.  #
     # You should use the lstm_step_backward function that you just defined.     #
     #############################################################################
+    T, _, _ = dh.shape
+    dprev_h = dh[-1, :, :]
+    dprev_c = np.zeros(dprev_h.shape)
+    dxt, dht, dct, dWx, dWh, db = lstm_step_backward(dprev_h, dprev_c, cache[-1])
+    dx = []
+    dx.append(dxt)
 
+    for t in range(T - 1):
+        dprev_h = dht + dh[-2 - t, :, :]
+        dxt, dht, dct, dWxt, dWht, dbt = lstm_step_backward(dprev_h, dct, cache[-2 - t])
+        dWx += dWxt
+        dWh += dWht
+        db += dbt
+        dx.append(dxt)
 
+    dx = np.stack(dx)
+    dx = dx[::-1, :, :]
+    dh0 = dht
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -275,6 +349,7 @@ def word_embedding_forward(x, W):
     cache = x, W
     return out, cache
 
+
 def word_embedding_backward(dout, cache):
     """
     Backward pass for word embeddings. We cannot back-propagate into the words
@@ -292,7 +367,6 @@ def word_embedding_backward(dout, cache):
     dW = np.zeros_like(W)
     np.add.at(dW, x, dout)
     return dW
-
 
 
 def temporal_fc_forward(x, w, b):
@@ -324,7 +398,6 @@ def temporal_fc_backward(dout, cache):
     """
 
 
-
 def temporal_softmax_loss(x, y, mask):
     """
     A temporal version of softmax loss for use in RNNs. We assume that we are
@@ -348,6 +421,3 @@ def temporal_softmax_loss(x, y, mask):
     - loss: Scalar giving loss
     - dx: Gradient of loss with respect to scores x.
     """
-
-
-

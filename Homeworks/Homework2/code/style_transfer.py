@@ -155,8 +155,8 @@ def tv_loss(img, tv_weight):
       for img weighted by tv_weight.
     """
     # Your implementation should be vectorized and not require any loops!
-    loss = tv_weight * (torch.sum(torch.abs(img[:, :, :, :-1] - img[:, :, :, 1:])**2) +
-                        torch.sum(torch.abs(img[:, :, :-1, :] - img[:, :, 1:, :]))**2)
+    loss = tv_weight * (torch.sum(torch.abs(img[:, :, :, :-1] - img[:, :, :, 1:])) +
+                        torch.sum(torch.abs(img[:, :, :-1, :] - img[:, :, 1:, :])))
     return loss
 
 
@@ -233,6 +233,7 @@ def style_transfer(content_image, style_image, image_size, style_size, content_l
     plt.show()
     plt.figure()
 
+    loss_all = []
     for t in range(200):
         if t < 190:
             img.clamp_(-1.5, 1.5)
@@ -248,6 +249,7 @@ def style_transfer(content_image, style_image, image_size, style_size, content_l
         s_loss = style_loss(feats, style_layers, style_targets, style_weights)
         t_loss = tv_loss(img_var, tv_weight)
         loss = c_loss + s_loss + t_loss
+        loss_all.append(loss)
         loss.backward()
 
         # Perform gradient descents on our image values
@@ -265,6 +267,8 @@ def style_transfer(content_image, style_image, image_size, style_size, content_l
     plt.axis('off')
     plt.imshow(deprocess(img.cpu()))
     plt.show()
+    import pdb
+    pdb.set_trace()  # breakpoint fedbfd9b //
 
 
 def main():
